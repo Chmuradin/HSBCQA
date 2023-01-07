@@ -1,0 +1,197 @@
+rm(list = ls())
+gc()
+#wczytanie bibliotek
+library(quantmod)
+library(dplyr)
+library(magrittr)
+library(nortest)
+library(car)
+library(tseries)
+library(ggplot2)
+library(ggpubr)
+
+#wczytanie snp
+getSymbols("^GSPC",
+           src = "yahoo",
+           from = Sys.Date() - 5 * 365,
+           to = Sys.Date())
+#wczytanie dax
+getSymbols("^GDAXI",
+           src = "yahoo",
+           from = Sys.Date() - 5 * 365,
+           to = Sys.Date())
+#NASDAQ
+getSymbols("^IXIC",
+           src = "yahoo",
+           from = Sys.Date() - 5 * 365,
+           to = Sys.Date())
+#dow jones industrial avrage
+getSymbols("^DJI",
+           src = "yahoo",
+           from = Sys.Date() - 5 * 365,
+           to = Sys.Date())
+tickers <- list(GSPC, GDAXI, IXIC, DJI)
+
+GSPC %<>% as.data.frame()
+GDAXI %<>% as.data.frame()
+IXIC %<>% as.data.frame()
+DJI %<>% as.data.frame()
+
+GSPC %<>% select(4) %>% transmute(pnl = diff(c(0, GSPC.Close))) %>% tail(-1)
+GDAXI %<>% select(4) %>% transmute(pnl = diff(c(0, GDAXI.Close))) %>% tail(-1)
+IXIC %<>% select(4) %>% transmute(pnl = diff(c(0, IXIC.Close))) %>% tail(-1)
+DJI %<>% select(4) %>% transmute(pnl = diff(c(0, DJI.Close))) %>% tail(-1)
+tickers <- list(GSPC, GDAXI, IXIC, DJI)
+ticker_names <- c("GSPC", "GDAXI", "IXIC", "DJI")
+PNL <- GSPC
+for (i in 2:4){
+  PNL %<>% merge(tickers[[i]], by = "row.names", all = TRUE)
+  row.names(PNL) <- (PNL[, 1])
+  PNL %<>% select(-1)
+  colnames(PNL) <- ticker_names[1:i]
+}
+rm(DJI,GDAXI,GSPC,IXIC,tickers,ticker_names,i)
+
+Pnl_GSPC <- pull(PNL, GSPC)
+Pnl_GDAXI <- pull(PNL, GDAXI)
+Pnl_IXIC <- pull(PNL, IXIC)
+Pnl_DJI <- pull(PNL, DJI)
+daty <- as.Date(row.names(PNL))
+
+###Funkcje z pętlą for
+
+empirical_VaR_for <- function(returns, n, alpha = 0.01) {
+  caly_var <- c()
+  for (i in (n + 1):length(returns)) {
+    caly_var[i - n] <- -sort(returns[(i - n):i])[floor(alpha * n) + 1]
+  }
+  return(caly_var)
+}
+
+
+normal_VaR_for <- function(returns, n, alpha = 0.01) {
+  caly_var <- c()
+  for (i in (n + 1):length(returns)) {
+    
+    caly_var[i - n] <- -(mean(returns[(i - n):i],na.rm=TRUE) +
+                           sd(returns[(i - n):i],na.rm=TRUE) * qnorm(alpha))
+  }
+  return(caly_var)
+}
+
+unbiased_normal_VaR_for <- function(returns, n, alpha = 0.01){
+  caly_var_un <- c()
+  for (i in (n + 1):length(returns)) {
+    ret_from_period <- returns[(i - n):i]
+    caly_var_un[i-n] <- -(mean(ret_from_period,na.rm=TRUE) + sd(ret_from_period,na.rm=TRUE) *
+                            sqrt((n + 1) / n) * qt(alpha, n - 1))
+  }
+  return(caly_var_un)
+}
+
+
+### Funkcje z apply
+empirical_VaR <- function(returns, n, alpha = 0.01){
+  new_returns = embed(returns,n + 1)
+  return(apply(new_returns, 1, function(x) -sort(x)[floor(alpha*n)+1]))
+  
+}
+
+normal_VaR <- function(returns, n, alpha = 0.01){
+  new_returns <- embed(returns, n + 1)
+  return(apply(new_returns, 1, function(x) -(mean(x,na.rm=TRUE) + sd(x,na.rm=TRUE)
+                                             * qnorm(alpha))))
+}
+
+unbiased_normal_VaR <- function(returns, n, alpha = 0.01){
+  new_returns <- embed(returns, n + 1)
+  return(apply(new_returns, 1, function(x) -(mean(x,na.rm=TRUE) + sd(x,na.rm=TRUE) * 
+                                            sqrt(( n + 1) / n) * qt(alpha, n-1))))
+}
+
+#Porównanie tych funkcji
+setequal(normal_VaR_for(Pnl_GSPC, 500),normal_VaR(Pnl_GSPC,500))
+setequal(empirical_VaR_for(Pnl_GSPC, 500),empirical_VaR(Pnl_GSPC,500))
+#tutaj jest jakieś numeryczne w jakimś miejscu, pewnie przez NA
+setequal(unbiased_normal_VaR_for(Pnl_GSPC, 500),unbiased_normal_VaR(Pnl_GSPC,500))
+unbiased_normal_VaR_for(Pnl_GSPC, 500) == unbiased_normal_VaR(Pnl_GSPC,500)
+
+
+par(mfrow = c(3,2))
+plot(empirical_VaR(Pnl_DJI,500), type = 'l', col = 'red')
+plot(empirical_VaR_for(Pnl_DJI,500), type = 'l', col = 'blue')
+
+plot(normal_VaR(Pnl_DJI,500), type = 'l', col = 'red')
+plot(normal_VaR_for(Pnl_DJI,500), type = 'l', col = 'blue')
+
+plot(unbiased_normal_VaR(Pnl_DJI,500), type = 'l', col = 'red')
+plot(unbiased_normal_VaR_for(Pnl_DJI,500), type = 'l', col = 'blue')
+
+
+###funkcje do używanie ggplot2, wypluwają nam wynik jako Data.frame wraz z kolumną dat
+df_empirical_VaR <- function(returns, n, alpha = 0.01, df = PNL) {
+  new_returns = embed(returns, n + 1)
+  emp_var = apply(new_returns, 1, function(x) -sort(x)[floor(alpha * n) + 1])
+  
+  daty = tail(as.Date(row.names(PNL)), length(returns) - n)
+  
+  var_df = as.data.frame(list(daty, emp_var), col.names = c('Date','Var')
+                         ,row.names = NULL)
+  return(var_df)
+}
+GSPC_emp <- df_empirical_VaR(Pnl_GSPC,500)
+#View(GSPC_emp)
+
+df_normal_VaR <- function(returns, n, alpha = 0.01, df = PNL) {
+  new_returns = embed(returns, n + 1)
+  emp_var = apply(new_returns, 1, function(x) -(mean(x,na.rm=TRUE) + sd(x,na.rm=TRUE)
+                                                * qnorm(alpha)))
+  daty = tail(as.Date(row.names(PNL)), length(returns) - n)
+  
+  var_df = as.data.frame(list(daty, emp_var), col.names = c('Date','Var')
+                         ,row.names = NULL)
+  return(var_df)
+}
+
+GSPC_norm <- df_normal_VaR(Pnl_GSPC, 500)
+#View(GSPC_norm)
+
+df_un_normal_VaR <- function(returns, n, alpha = 0.01, df = PNL) {
+  new_returns = embed(returns, n + 1)
+  emp_var = apply(new_returns, 1, function(x) -(mean(x,na.rm=TRUE) + sd(x,na.rm=TRUE) * 
+                                                sqrt(( n + 1) / n) * qt(alpha, n-1)))
+  daty = tail(as.Date(row.names(PNL)), length(returns) - n)
+  
+  var_df = as.data.frame(list(daty, emp_var), col.names = c('Date','Var')
+                         ,row.names = NULL)
+  return(var_df)
+}
+
+GSPC_un_norm <- df_un_normal_VaR(Pnl_GSPC, 500)
+#View(GSPC_un_norm)
+
+#takie same wyniki
+#GSPC_un_norm['Var'] == unbiased_normal_VaR(Pnl_GSPC,500)
+#GSPC_un_norm['Var'] == unbiased_normal_VaR_for(Pnl_GSPC,500)
+
+#przykładowy wykres w ggplot2
+wykres_emp_GSPC <- ggplot(GSPC_emp, aes(x=Date, y=Var)) +
+  geom_line( color="deepskyblue4") + 
+  labs(title ="GSPC", x = "Date", y = "Var_emp") + 
+  theme(plot.title = element_text(size=15, hjust = 0.5, face = "bold"))
+wykres_emp_GSPC
+
+wykres_norm_GSPC <- ggplot(GSPC_norm, aes(x=Date, y=Var)) +
+  geom_line( color="deepskyblue4") + 
+  labs(title ="GSPC", x = "Date", y = "Var_norm") + 
+  theme(plot.title = element_text(size=15, hjust = 0.5, face = "bold"))
+wykres_norm_GSPC
+
+wykres_un_norm_GSPC <- ggplot(GSPC_un_norm, aes(x=Date, y=Var)) +
+  geom_line( color="deepskyblue4") + 
+  labs(title ="GSPC", x = "Date", y = "Var_un_norm") + 
+  theme(plot.title = element_text(size=15, hjust = 0.5, face = "bold"))
+wykres_un_norm_GSPC
+
+ggarrange(wykres_emp_GSPC, wykres_norm_GSPC, wykres_un_norm_GSPC, 
+          ncol = 3, nrow = 1)
