@@ -1,0 +1,588 @@
+Sys.setlocale("LC_TIME", "English")
+rm(list = ls())
+gc()
+#wczytanie bibliotek
+library(quantmod)
+library(dplyr)
+library(magrittr)
+library(nortest)
+library(car)
+library(tseries)
+library(ggplot2)
+library(ggpubr)
+
+#wczytanie snp
+getSymbols("^GSPC",
+           src = "yahoo",
+           from = Sys.Date() - 5 * 365,
+           to = Sys.Date())
+#wczytanie dax
+getSymbols("^GDAXI",
+           src = "yahoo",
+           from = Sys.Date() - 5 * 365,
+           to = Sys.Date())
+#NASDAQ
+getSymbols("^IXIC",
+           src = "yahoo",
+           from = Sys.Date() - 5 * 365,
+           to = Sys.Date())
+#dow jones industrial avrage
+getSymbols("^DJI",
+           src = "yahoo",
+           from = Sys.Date() - 5 * 365,
+           to = Sys.Date())
+tickers <- list(GSPC, GDAXI, IXIC, DJI)
+
+GSPC %<>% as.data.frame()
+GDAXI %<>% as.data.frame()
+IXIC %<>% as.data.frame()
+DJI %<>% as.data.frame()
+
+GSPC %<>% select(4) %>% transmute(pnl = diff(c(0, GSPC.Close))) %>% tail(-1)
+GDAXI %<>% select(4) %>% transmute(pnl = diff(c(0, GDAXI.Close))) %>% tail(-1)
+IXIC %<>% select(4) %>% transmute(pnl = diff(c(0, IXIC.Close))) %>% tail(-1)
+DJI %<>% select(4) %>% transmute(pnl = diff(c(0, DJI.Close))) %>% tail(-1)
+tickers <- list(GSPC, GDAXI, IXIC, DJI)
+ticker_names <- c("GSPC", "GDAXI", "IXIC", "DJI")
+PNL <- GSPC
+for (i in 2:4){
+  PNL %<>% merge(tickers[[i]], by = "row.names", all = TRUE)
+  row.names(PNL) <- (PNL[, 1])
+  PNL %<>% select(-1)
+  colnames(PNL) <- ticker_names[1:i]
+}
+rm(DJI,GDAXI,GSPC,IXIC,tickers,ticker_names,i)
+
+Pnl_GSPC <- pull(PNL, GSPC)
+Pnl_GDAXI <- pull(PNL, GDAXI)
+Pnl_IXIC <- pull(PNL, IXIC)
+Pnl_DJI <- pull(PNL, DJI)
+daty <- as.Date(row.names(PNL))
+
+###funkcje do używanie ggplot2, wypluwają nam wynik jako Data.frame wraz z kolumną dat
+df_empirical_VaR <- function(returns, n, alpha = 0.01, df = PNL) {
+  new_returns = embed(returns, n + 1)
+  emp_var = apply(new_returns, 1, function(x) -sort(x)[floor(alpha * n) + 1])
+  
+  daty = tail(as.Date(row.names(PNL)), length(returns) - n)
+  a <- n+1
+  b <- length(returns)
+  pnls = returns[a:b]
+  
+  var_df = as.data.frame(list(daty, emp_var, pnls), col.names = c('Date','Var', 'PnL')
+                         ,row.names = NULL)
+  return(var_df)
+}
+GSPC_emp_500 <- df_empirical_VaR(Pnl_GSPC,500)
+GSPC_emp_200 <- df_empirical_VaR(Pnl_GSPC,200)
+GDAXI_emp_500 <- df_empirical_VaR(Pnl_GDAXI,500)
+GDAXI_emp_200 <- df_empirical_VaR(Pnl_GDAXI,200)
+IXIC_emp_500 <- df_empirical_VaR(Pnl_IXIC,500)
+IXIC_emp_200 <- df_empirical_VaR(Pnl_IXIC,200)
+DJI_emp_500 <- df_empirical_VaR(Pnl_DJI,500)
+DJI_emp_200 <- df_empirical_VaR(Pnl_DJI,200)
+
+df_normal_VaR <- function(returns, n, alpha = 0.01, df = PNL) {
+  new_returns = embed(returns, n + 1)
+  emp_var = apply(new_returns, 1, function(x) -(mean(x,na.rm=TRUE) + sd(x,na.rm=TRUE)
+                                                * qnorm(alpha)))
+  daty = tail(as.Date(row.names(PNL)), length(returns) - n)
+  
+  a <- n+1
+  b <- length(returns)
+  pnls = returns[a:b]
+  
+  var_df = as.data.frame(list(daty, emp_var, pnls), col.names = c('Date','Var', 'PnL')
+                         ,row.names = NULL)
+  return(var_df)
+}
+
+GSPC_norm_500 <- df_normal_VaR(Pnl_GSPC, 500)
+GSPC_norm_200 <- df_normal_VaR(Pnl_GSPC, 200)
+GDAXI_norm_500 <- df_normal_VaR(Pnl_GDAXI, 500)
+GDAXI_norm_200 <- df_normal_VaR(Pnl_GDAXI, 200)
+IXIC_norm_500 <- df_normal_VaR(Pnl_IXIC, 500)
+IXIC_norm_200 <- df_normal_VaR(Pnl_IXIC, 200)
+DJI_norm_500 <- df_normal_VaR(Pnl_DJI, 500)
+DJI_norm_200 <- df_normal_VaR(Pnl_DJI, 200)
+
+
+df_un_normal_VaR <- function(returns, n, alpha = 0.01, df = PNL) {
+  new_returns = embed(returns, n + 1)
+  emp_var = apply(new_returns, 1, function(x) -(mean(x,na.rm=TRUE) + sd(x,na.rm=TRUE) * 
+                                                sqrt(( n + 1) / n) * qt(alpha, n-1)))
+  daty = tail(as.Date(row.names(PNL)), length(returns) - n)
+  
+  a <- n+1
+  b <- length(returns)
+  pnls = returns[a:b]
+  
+  var_df = as.data.frame(list(daty, emp_var, pnls), col.names = c('Date','Var', 'PnL')
+                         ,row.names = NULL)
+  return(var_df)
+}
+
+GSPC_un_norm_500 <- df_un_normal_VaR(Pnl_GSPC, 500)
+GSPC_un_norm_200 <- df_un_normal_VaR(Pnl_GSPC, 200)
+GDAXI_un_norm_500 <- df_un_normal_VaR(Pnl_GDAXI, 500)
+GDAXI_un_norm_200 <- df_un_normal_VaR(Pnl_GDAXI, 200)
+IXIC_un_norm_500 <- df_un_normal_VaR(Pnl_IXIC, 500)
+IXIC_un_norm_200 <- df_un_normal_VaR(Pnl_IXIC, 200)
+DJI_un_norm_500 <- df_un_normal_VaR(Pnl_DJI, 500)
+DJI_un_norm_200 <- df_un_normal_VaR(Pnl_DJI, 200)
+
+library(showtext)
+font_add_google("Roboto Slab", ## name of Google font
+                "Roboto")  ## name that will be used in R
+font_add_google("Abel", "Abel")
+showtext_auto()
+options("device" = "windows")
+
+#WYKRESY 500-dniowe
+#GSPC 500 days empirical
+wykres_emp_GSPC_500 <- ggplot(na.omit(GSPC_emp_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="GSPC", subtitle = "empirical estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  coord_fixed(ratio = 1/2) +
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "deepskyblue",
+                                "P&L" = "firebrick"))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+  
+wykres_emp_GSPC_500
+
+#Normal plot empirical GSPC 500
+wykres_norm_GSPC_500 <- ggplot(na.omit(GSPC_norm_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="GSPC", subtitle = "normal estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  coord_fixed(ratio = 1/2) +
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 10))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "darkmagenta",
+                                "P&L" = "firebrick"))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+
+wykres_norm_GSPC_500
+
+#Unbiased normal plot GSPC 500 
+wykres_un_norm_GSPC_500 <- ggplot(na.omit(GSPC_un_norm_500), aes(x=Date)) +
+  theme_bw(base_family = "Roboto")+
+  geom_line(aes(y=PnL, color = "P&L")) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  labs(title ="GSPC", subtitle = "unbiased normal estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  coord_fixed(ratio = 1/2) +
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 10))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "seagreen4",
+                                "P&L" = "firebrick"))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+wykres_un_norm_GSPC_500
+
+###GSPC 500 2020
+wykres_emp_GSPC_2020_500 <- ggplot(na.omit(GSPC_emp_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="GSPC (2020)", subtitle = "empirical estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  theme(plot.title = element_text(family = "Roboto", size=15, hjust = 0.5, face = "bold"))+
+  coord_fixed(ratio = 1/2) +
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "deepskyblue",
+                                "P&L" = "firebrick"))+
+  scale_x_date(limits = as.Date(c("2020-01-01", "2020-12-31")))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+
+wykres_emp_GSPC_2020_500
+
+
+
+wykres_norm_GSPC_2020_500 <- ggplot(na.omit(GSPC_norm_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="GSPC (2020)", subtitle ="normal estimator (lookback period: 500 days)",  x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=15, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  coord_fixed(ratio = 1/2) +
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 8))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "darkmagenta",
+                                "P&L" = "firebrick"))+
+  scale_x_date(limits = as.Date(c("2020-01-01", "2020-12-31")))+
+  theme(legend.position = c(0.9, 0.18),
+      legend.background = element_rect(fill = "transparent"))
+
+wykres_norm_GSPC_2020_500
+
+wykres_un_norm_GSPC_2020_500 <- ggplot(na.omit(GSPC_un_norm_500), aes(x=Date)) +
+  theme_bw(base_family = "Roboto")+
+  geom_line(aes(y=PnL, color = "P&L")) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  labs(title ="GSPC (2020)",  subtitle ="unbiased normal estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=13, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  coord_fixed(ratio = 1/2) +
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 8))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "seagreen4",
+                                "P&L" = "firebrick"))+
+  scale_x_date(limits = as.Date(c("2020-01-01", "2020-12-31")))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+wykres_un_norm_GSPC_2020_500
+
+#wykresy GDAXI
+#GDAXI 500 empirical 
+wykres_emp_GDAXI_500 <- ggplot(na.omit(GDAXI_emp_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="GDAXI", subtitle = "empirical estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  coord_fixed(ratio = 1/2, expand = TRUE) +
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "deepskyblue",
+                                "P&L" = "firebrick"))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+
+wykres_emp_GDAXI_500
+
+#Normal plot GDAXI 500
+wykres_norm_GDAXI_500 <- ggplot(na.omit(GDAXI_norm_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="GDAXI", subtitle = "normal estimator (lookback period: 500 days)",  x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  coord_fixed(ratio = 1/2) +
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 10))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "darkmagenta",
+                                "P&L" = "firebrick"))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+
+wykres_norm_GDAXI_500
+
+#Unbiased normal plot GDAXI 500
+wykres_un_norm_GDAXI_500 <- ggplot(na.omit(GDAXI_un_norm_500), aes(x=Date)) +
+  theme_bw(base_family = "Roboto")+
+  geom_line(aes(y=PnL, color = "P&L")) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  labs(title ="GDAXI", subtitle = "unbiased normal estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  coord_fixed(ratio = 1/2) +
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 10))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "seagreen4",
+                                "P&L" = "firebrick"))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+wykres_un_norm_GDAXI_500
+
+###Wykresy GDAXI 2020
+### emp GDAXI 2020
+wykres_emp_GDAXI_500_2020 <- ggplot(na.omit(GDAXI_emp_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="GDAXI (2020)", subtitle = "empirical estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "deepskyblue",
+                                "P&L" = "firebrick"))+
+  scale_x_date(limits = as.Date(c("2020-01-01", "2020-12-31")))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+
+
+wykres_emp_GDAXI_500_2020
+
+#Normal plot GDAXI 500 2020
+wykres_norm_GDAXI_500_2020 <- ggplot(na.omit(GDAXI_norm_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="GDAXI (2020)", subtitle = "normal estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 10))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "darkmagenta",
+                                "P&L" = "firebrick"))+
+  scale_x_date(limits = as.Date(c("2020-01-01", "2020-12-31")))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+
+wykres_norm_GDAXI_500_2020
+
+#Unbiased normal plot GDAXI 500 2020
+wykres_un_norm_GDAXI_500_2020 <- ggplot(na.omit(GDAXI_un_norm_500), aes(x=Date)) +
+  theme_bw(base_family = "Roboto")+
+  geom_line(aes(y=PnL, color = "P&L")) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  labs(title ="GDAXI (2020)", subtitle = "unbiased normal estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 10))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "seagreen4",
+                                "P&L" = "firebrick"))+
+  scale_x_date(limits = as.Date(c("2020-01-01", "2020-12-31")))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+wykres_un_norm_GDAXI_500_2020
+
+
+###wykresy IXIC 500
+#empirical IXIC 500
+wykres_emp_IXIC_500 <- ggplot(na.omit(IXIC_emp_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="IXIC", subtitle = "empirical estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  coord_fixed(ratio = 1/2) +
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "deepskyblue",
+                                "P&L" = "firebrick"))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+
+wykres_emp_IXIC_500
+
+#Normal plot IXIC 500
+wykres_norm_IXIC_500 <- ggplot(na.omit(IXIC_norm_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="IXIC", subtitle = "normal estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  coord_fixed(ratio = 1/2) +
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 10))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "darkmagenta",
+                                "P&L" = "firebrick"))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+
+wykres_norm_IXIC_500
+
+#Unbiased normal plot IXIC 500
+wykres_un_norm_IXIC_500 <- ggplot(na.omit(IXIC_un_norm_500), aes(x=Date)) +
+  theme_bw(base_family = "Roboto")+
+  geom_line(aes(y=PnL, color = "P&L")) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  labs(title ="IXIC", subtitle = "unbiased normal estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  coord_fixed(ratio = 1/2) +
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 10))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "seagreen4",
+                                "P&L" = "firebrick"))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+wykres_un_norm_IXIC_500
+
+###IXIC 2020
+#empirical IXIC 500 2020
+wykres_emp_IXIC_500_2020 <- ggplot(na.omit(IXIC_emp_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="IXIC 2020", subtitle = "empirical estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "deepskyblue",
+                                "P&L" = "firebrick"))+
+  scale_x_date(limits = as.Date(c("2020-01-01", "2020-12-31")))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+
+wykres_emp_IXIC_500_2020
+
+#Normal plot IXIC 500 2020
+wykres_norm_IXIC_500_2020 <- ggplot(na.omit(IXIC_norm_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="IXIC 2020", subtitle = "normal estimator (lookback peirod: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 10))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "darkmagenta",
+                                "P&L" = "firebrick"))+
+  scale_x_date(limits = as.Date(c("2020-01-01", "2020-12-31")))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+
+wykres_norm_IXIC_500_2020
+
+#Unbiased normal plot IXIC 500 2020
+wykres_un_norm_IXIC_500_2020 <- ggplot(na.omit(IXIC_un_norm_500), aes(x=Date)) +
+  theme_bw(base_family = "Roboto")+
+  geom_line(aes(y=PnL, color = "P&L")) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  labs(title ="IXIC 2020", subtitle = "unbiased normal estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 10))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "seagreen4",
+                                "P&L" = "firebrick"))+
+  scale_x_date(limits = as.Date(c("2020-01-01", "2020-12-31")))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+wykres_un_norm_IXIC_500_2020
+
+
+#Wykresy DJI 500
+#Wykres empirical DJI 500
+wykres_emp_DJI_500 <- ggplot(na.omit(DJI_emp_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="DJI", subtitle = "empirical estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "deepskyblue",
+                                "P&L" = "firebrick"))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+
+wykres_emp_DJI_500
+
+#Normal plot DJI 500
+wykres_norm_DJI_500 <- ggplot(na.omit(DJI_norm_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="DJI", subtitle = "normal estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 10))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "darkmagenta",
+                                "P&L" = "firebrick"))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+
+wykres_norm_DJI_500
+
+#Unbiased normal plot DJI 500
+wykres_un_norm_DJI_500 <- ggplot(na.omit(DJI_un_norm_500), aes(x=Date)) +
+  theme_bw(base_family = "Roboto")+
+  geom_line(aes(y=PnL, color = "P&L")) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  labs(title ="DJI", subtitle = "unbiased normal estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 10))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "seagreen4",
+                                "P&L" = "firebrick"))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+wykres_un_norm_DJI_500
+
+###wykres DJI 500 2020
+wykres_emp_DJI_500_2020 <- ggplot(na.omit(DJI_emp_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="DJI (2020)", subtitle = "empirical estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "deepskyblue",
+                                "P&L" = "firebrick"))+
+  scale_x_date(limits = as.Date(c("2020-01-01", "2020-12-31")))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+
+wykres_emp_DJI_500_2020
+
+#Normal plot DJI 500
+wykres_norm_DJI_500_2020 <- ggplot(na.omit(DJI_norm_500), aes(x=Date)) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  geom_line(aes(y=PnL, color = "P&L")) +
+  theme_bw(base_family = "Roboto")+
+  labs(title ="DJI (2020)", subtitle = "normal estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 10))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "darkmagenta",
+                                "P&L" = "firebrick"))+
+  scale_x_date(limits = as.Date(c("2020-01-01", "2020-12-31")))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+
+wykres_norm_DJI_500_2020
+
+#Unbiased normal plot DJI 500
+wykres_un_norm_DJI_500_2020 <- ggplot(na.omit(DJI_un_norm_500), aes(x=Date)) +
+  theme_bw(base_family = "Roboto")+
+  geom_line(aes(y=PnL, color = "P&L")) +
+  geom_line(aes(y=Var, color = "Value at Risk")) +
+  labs(title ="DJI (2020)", subtitle = "unbiased normal estimator (lookback period: 500 days)", x = "Date", y = NULL, color = "Legend") +
+  theme(plot.title = element_text(size=20, hjust = 0.5, face = "bold"))+
+  theme(plot.subtitle = element_text(size=12, hjust = 0.5))+
+  theme(axis.text.x = element_text(angle = 0, vjust = 1, hjust = 0.5, size = 10))+
+  scale_color_manual(name = NULL,
+                     guide = "legend",
+                     values = c("Value at Risk" = "seagreen4",
+                                "P&L" = "firebrick"))+
+  scale_x_date(limits = as.Date(c("2020-01-01", "2020-12-31")))+
+  theme(legend.position = c(0.9, 0.18),
+        legend.background = element_rect(fill = "transparent"))
+wykres_un_norm_DJI_500_2020
