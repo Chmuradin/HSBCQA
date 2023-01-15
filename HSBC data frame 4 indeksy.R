@@ -10,6 +10,12 @@ library(tseries)
 library(ggh4x)
 library(fitdistrplus)
 library(cowplot)
+library(showtext)
+font_add_google("Roboto Slab", ## name of Google font
+                "Roboto")  ## name that will be used in R
+font_add_google("Abel", "Abel")
+showtext_auto()
+options("device" = "windows")
 #wczytanie snp
 end_date=as.Date("2022-12-31")
 getSymbols("^GSPC",
@@ -78,19 +84,19 @@ plot_data$index %<>% as.factor()
 plot_data %<>% mutate(after_covid=date>as.Date("2020-03-01"))
 ## plot pnlow
 plot_data %>% ggplot(aes(x=date,y=PnL)) +
-  geom_bar(stat="identity")+ggh4x::facet_grid2(cols=vars(index),independent = T,scales="free")
+  geom_bar(stat="identity",fill="skyblue3")+ggh4x::facet_grid2(cols=vars(index),independent = T,scales="free")+theme_bw(base_family = "Roboto")
 ## porownanie gestosci
 plot_data %>% ggplot(aes(x=PnL))+geom_density(aes(color='density estimator'))+ggh4x::facet_grid2(cols=vars(index),scales="free",independent = T)+
   stat_theodensity(aes(color='fitted normal density'))+
   scale_color_manual(name='',
                      breaks=c('density estimator','fitted normal density'),
                      values=c('density estimator'='black','fitted normal density'='red'))+
-   theme(legend.position="bottom")
+   theme_bw(base_family = "Roboto")
 #
 plot_data %>% group_by(index,after_covid) %>% summarise(sd = sd(PnL, na.rm=TRUE)) %>% 
-  ggplot(aes(x=after_covid,y=sd)) +
+  ggplot(aes(x=after_covid,y=sd,fill=after_covid)) +
   geom_bar(stat="identity")+facet_grid(cols=vars(index))+
-  labs(x="after covid",y="standard deviation")
+  labs(x="after covid",y="standard deviation")+theme_bw(base_family = "Roboto")
 ### testy normalnosci dla miesiecy
 indeksy=levels(plot_data$index)
 pvdf <- data.frame()
@@ -106,8 +112,8 @@ df %<>% mutate("kolor"=(pvalue<0.05))
 pvdf %<>% rbind(df) 
 }
 
-pvdf %>% ggplot(aes(x=month,y=pvalue,colour=kolor))+geom_bar(stat="identity",show.legend = FALSE)+
-  geom_hline(yintercept=0.05, linetype="dashed", color = "red")+theme(axis.text.x = element_text(size=3,angle = 90, vjust = 0.5, hjust=1))+facet_grid(cols=vars(index))
+pvdf %>% ggplot(aes(x=month,y=pvalue,fill=kolor))+geom_bar(stat="identity",show.legend = FALSE)+
+  geom_hline(yintercept=0.05, linetype="dashed", color = "red")+theme_bw(base_family = "Roboto")+theme(axis.text.x = element_text(size=3,angle = 90, vjust = 0.5, hjust=1))+facet_grid(cols=vars(index))
 rm(df,pvdf,i,splited)
 ## acf
 acfdf <- data.frame()
@@ -121,8 +127,8 @@ rm(a)
 }
 acfdf$corelation %<>% as.numeric() 
 acfdf$lag %<>% as.numeric() 
-acfdf %>% ggplot(aes(x=lag,y=corelation))+ geom_bar(stat="identity") +
-  facet_grid(cols=vars(index))
+acfdf %>% ggplot(aes(x=lag,y=corelation))+ geom_bar(stat="identity",fill="skyblue3") +
+  facet_grid(cols=vars(index))+theme_bw(base_family = "Roboto")
 rm(acfdf,i)
 ## abs value
 acfdf <- data.frame()
@@ -136,8 +142,8 @@ for (i in 1:length(indeksy)){
 }
 acfdf$corelation %<>% as.numeric() 
 acfdf$lag %<>% as.numeric() 
-acfdf %>% ggplot(aes(x=lag,y=corelation))+ geom_bar(stat="identity") +
-  facet_grid(cols=vars(index))
+acfdf %>% ggplot(aes(x=lag,y=corelation))+ geom_bar(stat="identity",fill="skyblue3") +
+  facet_grid(cols=vars(index))+theme_bw(base_family = "Roboto")+
 rm(acfdf,i)
 ##### homogenity test
 for (i in 1:length(indeksy)){
@@ -146,3 +152,4 @@ homotest <- plot_data %>% filter(index==indeksy[1]) %>%
 stats::fligner.test(PnL~month,homotest) %>% print()
 rm(homotest)
 }
+
